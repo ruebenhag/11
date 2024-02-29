@@ -1,0 +1,61 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+contract PaymentChannel {
+    address public sender;
+    address public recipient;
+    uint256 public expiration;
+    uint256 public value;
+    bool public closed;
+    bytes32 public hashlock;
+    uint256 public nonce;
+
+    event ChannelOpened(address indexed sender, address indexed recipient, uint256 value, uint256 expiration, bytes32 hashlock);
+    event ChannelClosed(address indexed sender, address indexed recipient, uint256 value);
+
+    modifier onlySender() {
+        require(msg.sender == sender, "Only sender can call this function");
+        _;
+    }
+
+    modifier onlyRecipient() {
+        require(msg.sender == recipient, "Only recipient can call this function");
+        _;
+    }
+
+    constructor(address _recipient, uint256 _expiration, bytes32 _hashlock) payable {
+        sender = msg.sender;
+        recipient = _recipient;
+        value = msg.value;
+        expiration = block.timestamp + _expiration;
+        hashlock = _hashlock;
+
+        emit ChannelOpened(sender, recipient, value, expiration, hashlock);
+    }
+
+    function closeChannel(bytes memory _secret, uint256 _nonce) public onlySender {
+        require(keccak256(abi.encodePacked(_secret)) == hashlock, "Invalid secret");
+        require(_nonce > nonce, "Invalid nonce");
+        nonce = _nonce;
+        closed = true;
+        payable(recipient).transfer(value);
+        emit ChannelClosed(sender, recipient, value);
+    }
+
+    function claimTimeout() public onlySender {
+        require(block.timestamp >= expiration, "Channel not expired yet");
+        require(!closed, "Channel already closed");
+        closed = true;
+        payable(sender).transfer(value);
+        emit ChannelClosed(sender, recipient, value);
+    }
+
+    function updateHashlock(bytes32 _newHashlock) public onlySender {
+        require(!closed, "Channel already closed");
+        hashlock = _newHashlock;
+    }
+
+    function getDetails() public view returns (address, address, uint256, uint256, bytes32, bool, uint256) {
+        return (sender, recipient, value, expiration, hashlock, closed, nonce);
+    }
+}
